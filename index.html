@@ -291,25 +291,35 @@
    ============================================================ */
 const LEAGUE_ID = 840577;
 
-// Free CORS proxy — FPL's API blocks direct browser requests, so every
-// call is routed through this. If it ever goes down, swap PROXY_BASE
-// for another proxy (or your own tiny Cloudflare Worker) — nothing
-// else in this file needs to change.
-const PROXY_BASE = 'https://api.allorigins.win/raw?url=';
+// FPL's API blocks direct browser requests, so every call is routed
+// through a free CORS proxy. Free proxies are flaky (rate limits,
+// occasional downtime), so instead of relying on just one, we try a
+// short list in order and fall through automatically if one fails.
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://api.cors.lol/url=${url}`,
+  url => `https://cors.x2u.in/${url}`
+];
 const API = 'https://fantasy.premierleague.com/api';
 const REFRESH_MS = 60000; // how often to auto-refresh
 
 /* ============================================================
    FETCH HELPERS
    ============================================================ */
-function proxied(url) {
-  return PROXY_BASE + encodeURIComponent(url);
-}
-
 async function fetchJSON(url) {
-  const res = await fetch(proxied(url), { cache: 'no-store' });
-  if (!res.ok) throw new Error('Request failed: ' + url);
-  return res.json();
+  let lastErr;
+  for (const buildProxyUrl of PROXIES) {
+    try {
+      const res = await fetch(buildProxyUrl(url), { cache: 'no-store' });
+      if (!res.ok) throw new Error('Bad status ' + res.status + ' for ' + url);
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+      // try the next proxy in the list
+    }
+  }
+  throw lastErr || new Error('All proxies failed for: ' + url);
 }
 
 /* ============================================================
