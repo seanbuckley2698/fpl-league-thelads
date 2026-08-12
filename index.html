@@ -291,17 +291,26 @@
    ============================================================ */
 const LEAGUE_ID = 840577;
 
-// FPL's API blocks direct browser requests, so every call is routed
-// through a free CORS proxy. Free proxies are flaky (rate limits,
-// occasional downtime), so instead of relying on just one, we try a
-// short list in order and fall through automatically if one fails.
-const PROXIES = [
-  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://api.cors.lol/url=${url}`,
-  url => `https://cors.x2u.in/${url}`
-];
+// FPL's API blocks direct browser requests, so every call needs to be
+// routed through something else. The most reliable option is your own
+// tiny Cloudflare Worker (free, no shared rate limits) — paste its URL
+// below once you've deployed it (see the setup steps you were given).
+// Until then, or if it's ever briefly down, the site automatically
+// falls back to a short list of free public CORS proxies.
+const WORKER_BASE = 'https://fpl-table-thelads.seanbuckley2698.workers.dev';
 const API = 'https://fantasy.premierleague.com/api';
+
+function toWorkerUrl(trueUrl) {
+  if (!WORKER_BASE) return null;
+  return trueUrl.replace('https://fantasy.premierleague.com', WORKER_BASE);
+}
+
+const PROXY_BUILDERS = [
+  trueUrl => toWorkerUrl(trueUrl),
+  trueUrl => `https://api.allorigins.win/raw?url=${encodeURIComponent(trueUrl)}`,
+  trueUrl => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(trueUrl)}`,
+  trueUrl => `https://api.cors.lol/url=${trueUrl}`
+];
 const REFRESH_MS = 60000; // how often to auto-refresh
 
 /* ============================================================
@@ -309,14 +318,16 @@ const REFRESH_MS = 60000; // how often to auto-refresh
    ============================================================ */
 async function fetchJSON(url) {
   let lastErr;
-  for (const buildProxyUrl of PROXIES) {
+  for (const build of PROXY_BUILDERS) {
+    const target = build(url);
+    if (!target) continue; // e.g. worker not configured yet
     try {
-      const res = await fetch(buildProxyUrl(url), { cache: 'no-store' });
-      if (!res.ok) throw new Error('Bad status ' + res.status + ' for ' + url);
+      const res = await fetch(target, { cache: 'no-store' });
+      if (!res.ok) throw new Error('Bad status ' + res.status + ' for ' + target);
       return await res.json();
     } catch (err) {
       lastErr = err;
-      // try the next proxy in the list
+      // try the next option in the list
     }
   }
   throw lastErr || new Error('All proxies failed for: ' + url);
