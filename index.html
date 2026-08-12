@@ -336,7 +336,12 @@ async function loadBootstrap() {
 async function loadStandings() {
   const data = await fetchJSON(`${API}/leagues-classic/${LEAGUE_ID}/standings/`);
   leagueName = data.league.name;
-  return data.standings.results;
+  return {
+    results: data.standings.results,
+    // before GW1 has finished, FPL hasn't calculated standings yet —
+    // members instead show up here, with no points attached
+    newEntries: (data.new_entries && data.new_entries.results) || []
+  };
 }
 
 async function loadPicks(entryId) {
@@ -401,6 +406,28 @@ function renderStandings(standings) {
           <th>RK</th><th>MOVE</th><th>TEAM</th><th class="num">GW</th><th class="num">TOTAL</th>
         </tr>
       </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderPreseasonRoster(newEntries) {
+  const rows = newEntries.map((e, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>
+        <span class="team-name">${escapeHtml(e.entry_name)}</span>
+        <span class="manager-name">${escapeHtml(e.player_first_name + ' ' + e.player_last_name)}</span>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('standings-slot').innerHTML = `
+    <div class="card" style="margin-bottom:14px;">
+      <h3>SEASON NOT STARTED YET</h3>
+      <div class="sub">The table fills in once Gameweek 1 kicks off. Here's who's in the league so far:</div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>TEAM</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
@@ -594,30 +621,48 @@ async function refreshAll() {
   document.getElementById('error-slot').innerHTML = '';
   try {
     await loadBootstrap();
-    const standings = await loadStandings();
-    document.getElementById('league-name').textContent = leagueName + ' — GAMEWEEK ' + currentGW;
+    const { results, newEntries } = await loadStandings();
 
-    renderStandings(standings);
+    const seasonStarted = results.length > 0;
 
-    // fetch picks + history for every manager, a few at a time
-    const managerData = await mapLimited(standings, 4, async (row) => {
-      const [picks, history] = await Promise.all([
-        loadPicks(row.entry),
-        loadHistory(row.entry)
-      ]);
-      return {
-        entryId: row.entry,
-        team: row.entry_name,
-        picks: picks.picks,
-        entryHistory: picks.entry_history,
-        activeChip: picks.active_chip,
-        history
-      };
-    });
+    document.getElementById('league-name').textContent =
+      leagueName + (seasonStarted ? ' — GAMEWEEK ' + currentGW : ' — PRESEASON');
 
-    renderGameweek(managerData);
-    renderShame(managerData);
-    buildTicker(standings, managerData);
+    if (!seasonStarted) {
+      // No gameweek has finished yet — show who's in the league instead
+      // of an empty/broken table, and skip the gameweek/season stat pages.
+      renderPreseasonRoster(newEntries);
+      document.getElementById('gameweek-slot').innerHTML =
+        `<div class="card"><h3>NOTHING TO REPORT</h3><div class="sub">This fills in once Gameweek 1 kicks off.</div></div>`;
+      document.getElementById('shame-slot').innerHTML =
+        `<div class="card"><h3>NOTHING TO REPORT</h3><div class="sub">Records start once the season's underway.</div></div>`;
+      const track = document.getElementById('ticker-track');
+      const lines = [`${newEntries.length} MANAGERS SIGNED UP AND WAITING...`, 'GAMEWEEK 1 CAN\'T COME SOON ENOUGH...'];
+      const html = lines.map(l => `<span>${escapeHtml(l)}</span>`).join('');
+      track.innerHTML = html + html;
+    } else {
+      renderStandings(results);
+
+      // fetch picks + history for every manager, a few at a time
+      const managerData = await mapLimited(results, 4, async (row) => {
+        const [picks, history] = await Promise.all([
+          loadPicks(row.entry),
+          loadHistory(row.entry)
+        ]);
+        return {
+          entryId: row.entry,
+          team: row.entry_name,
+          picks: picks.picks,
+          entryHistory: picks.entry_history,
+          activeChip: picks.active_chip,
+          history
+        };
+      });
+
+      renderGameweek(managerData);
+      renderShame(managerData);
+      buildTicker(results, managerData);
+    }
 
     document.getElementById('last-synced').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
   } catch (err) {
