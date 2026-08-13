@@ -143,6 +143,40 @@
   }
   .lead-crown { color: var(--yellow); }
 
+  .team-icon {
+    width: 26px;
+    height: 26px;
+    object-fit: cover;
+    border: 2px solid var(--dim);
+    vertical-align: middle;
+    display: inline-block;
+  }
+  .team-icon-fallback {
+    width: 26px;
+    height: 26px;
+    border: 2px solid var(--dim);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: var(--cyan);
+    vertical-align: middle;
+  }
+
+  tr.naggin { background: rgba(255, 59, 92, 0.1); }
+  tr.naggin .team-name { color: var(--red); }
+  tr.naggin-divider td {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    color: var(--red);
+    background: rgba(255, 59, 92, 0.15);
+    border-top: 2px solid var(--red);
+    border-bottom: 2px solid var(--red);
+    padding: 8px 8px;
+    letter-spacing: 1px;
+  }
+
   /* ---------- stat cards (P302 / P303) ---------- */
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
   @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
@@ -291,6 +325,20 @@
    ============================================================ */
 const LEAGUE_ID = 840577;
 
+// Team icons — key by FPL entry ID (shown in the console/network tab, or
+// just ask me to print them out) and point to an image URL, e.g.:
+//   12345: 'icons/kroos-control.png'
+// Any team left out just gets an auto-generated initials badge instead,
+// so this is safe to leave empty until you've got images ready.
+const TEAM_ICONS = {
+  // 12345: 'icons/team-name.png',
+};
+
+// How many teams at the bottom of the table get dropped into the
+// relegation zone. Change this if you want more/fewer teams in it.
+const RELEGATION_ZONE_SIZE = 1;
+const RELEGATION_ZONE_NAME = 'THE NAGGIN ZONE';
+
 // FPL's API blocks direct browser requests, so every call needs to be
 // routed through something else. The most reliable option is your own
 // tiny Cloudflare Worker (free, no shared rate limits) — paste its URL
@@ -400,17 +448,41 @@ function playerPts(id) {
   return p ? p.event_points : 0;
 }
 
+function initials(name) {
+  const words = String(name).trim().split(/\s+/);
+  const chars = words.slice(0, 2).map(w => w[0] || '').join('');
+  return chars.toUpperCase() || '?';
+}
+
+function teamIconHtml(entryId, teamName) {
+  const src = TEAM_ICONS[entryId];
+  if (src) {
+    return `<img class="team-icon" src="${escapeHtml(src)}" alt="">`;
+  }
+  return `<div class="team-icon-fallback">${escapeHtml(initials(teamName))}</div>`;
+}
+
 function renderStandings(standings) {
-  const rows = standings.map(row => {
+  const naggingStart = Math.max(standings.length - RELEGATION_ZONE_SIZE, 0);
+
+  const rows = standings.map((row, idx) => {
     const delta = row.last_rank - row.rank; // positive = climbed
     let arrow = '&#9679;', moverClass = 'mover-flat';
     if (delta > 0) { arrow = '&#9650; ' + delta; moverClass = 'mover-up'; }
     else if (delta < 0) { arrow = '&#9660; ' + Math.abs(delta); moverClass = 'mover-down'; }
     const crown = row.rank === 1 ? '<span class="lead-crown">&#9819; </span>' : '';
+    const isNagging = idx >= naggingStart;
+
+    const divider = idx === naggingStart
+      ? `<tr class="naggin-divider"><td colspan="6">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</td></tr>`
+      : '';
+
     return `
-      <tr>
+      ${divider}
+      <tr class="${isNagging ? 'naggin' : ''}">
         <td class="num">${crown}${row.rank}</td>
         <td class="rank-cell ${moverClass}">${arrow}</td>
+        <td>${teamIconHtml(row.entry, row.entry_name)}</td>
         <td>
           <span class="team-name">${escapeHtml(row.entry_name)}</span>
           <span class="manager-name">${escapeHtml(row.player_name)}</span>
@@ -424,7 +496,7 @@ function renderStandings(standings) {
     <table>
       <thead>
         <tr>
-          <th>RK</th><th>MOVE</th><th>TEAM</th><th class="num">GW</th><th class="num">TOTAL</th>
+          <th>RK</th><th>MOVE</th><th></th><th>TEAM</th><th class="num">GW</th><th class="num">TOTAL</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -436,6 +508,7 @@ function renderPreseasonRoster(newEntries) {
   const rows = newEntries.map((e, i) => `
     <tr>
       <td class="num">${i + 1}</td>
+      <td>${teamIconHtml(e.entry, e.entry_name)}</td>
       <td>
         <span class="team-name">${escapeHtml(e.entry_name)}</span>
         <span class="manager-name">${escapeHtml(e.player_first_name + ' ' + e.player_last_name)}</span>
@@ -448,7 +521,7 @@ function renderPreseasonRoster(newEntries) {
       <div class="sub">The table fills in once Gameweek 1 kicks off. Here's who's in the league so far:</div>
     </div>
     <table>
-      <thead><tr><th>#</th><th>TEAM</th></tr></thead>
+      <thead><tr><th>#</th><th></th><th>TEAM</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
