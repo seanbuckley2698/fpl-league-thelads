@@ -329,13 +329,13 @@
    ============================================================ */
 const LEAGUE_ID = 840577;
 
-// Team icons — key by FPL entry ID (shown in the console/network tab, or
-// just ask me to print them out) and point to an image URL, e.g.:
-//   12345: 'icons/kroos-control.png'
+// Team icons — key by the exact team name (as it appears in the table)
+// and point to an image file, e.g.:
+//   'Kroos Control': 'icons/icon_1.png'
 // Any team left out just gets an auto-generated initials badge instead,
 // so this is safe to leave empty until you've got images ready.
 const TEAM_ICONS = {
-  // 12345: 'icons/team-name.png',
+  // 'Team Name': 'icons/icon_1.png',
 };
 
 // How many teams at the bottom of the table get dropped into the
@@ -459,7 +459,7 @@ function initials(name) {
 }
 
 function teamIconHtml(entryId, teamName) {
-  const src = TEAM_ICONS[entryId];
+  const src = TEAM_ICONS[teamName];
   if (src) {
     return `<img class="team-icon" src="${escapeHtml(src)}" alt="">`;
   }
@@ -549,6 +549,36 @@ function renderPreseasonRoster(newEntries) {
 /* ============================================================
    RENDER: P302 THIS GAMEWEEK
    ============================================================ */
+function renderGameweekPlaceholder() {
+  document.getElementById('gameweek-slot').innerHTML = `
+    <div class="cards">
+      <div class="card warn">
+        <h3>CAPTAIN'S CURSE</h3>
+        <div class="big">&mdash;</div>
+        <div class="who">&mdash;</div>
+      </div>
+      <div class="card gold">
+        <h3>CAPTAIN FANTASTIC</h3>
+        <div class="big">&mdash;</div>
+        <div class="who">&mdash;</div>
+      </div>
+      <div class="card cool">
+        <h3>BENCHED HERO</h3>
+        <div class="big">&mdash;</div>
+        <div class="who">&mdash;</div>
+      </div>
+      <div class="card">
+        <h3>PALMS GREASED?</h3>
+        <div class="sub">No gameweek yet &mdash; nobody's had the chance.</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>DEADWOOD ON THE BENCH</h3>
+      <div class="sub">This fills in once Gameweek 1 kicks off.</div>
+    </div>
+  `;
+}
+
 function renderGameweek(managerData) {
   // managerData: [{ name, team, entryId, picks, entryHistory, activeChip }]
 
@@ -772,8 +802,7 @@ async function refreshAll() {
       // No gameweek has finished yet — show who's in the league instead
       // of an empty/broken table, and skip the gameweek/season stat pages.
       renderPreseasonRoster(newEntries);
-      document.getElementById('gameweek-slot').innerHTML =
-        `<div class="card"><h3>NOTHING TO REPORT</h3><div class="sub">This fills in once Gameweek 1 kicks off.</div></div>`;
+      renderGameweekPlaceholder();
       renderShamePlaceholder();
       const track = document.getElementById('ticker-track');
       const lines = [`${newEntries.length} MANAGERS SIGNED UP AND WAITING...`, 'GAMEWEEK 1 CAN\'T COME SOON ENOUGH...'];
