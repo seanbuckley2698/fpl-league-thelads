@@ -181,7 +181,7 @@
     padding: 8px 8px;
     letter-spacing: 1px;
   }
-  tr.naggin-divider td {
+  .naggin-divider-inner {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -513,7 +513,7 @@ function renderStandings(standings) {
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
 
     const divider = idx === naggingStart
-      ? `<tr class="naggin-divider"><td colspan="6"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</td></tr>`
+      ? `<tr class="naggin-divider"><td colspan="6"><div class="naggin-divider-inner"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</div></td></tr>`
       : '';
 
     return `
@@ -551,7 +551,7 @@ function renderPreseasonRoster(newEntries) {
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
 
     const divider = idx === naggingStart
-      ? `<tr class="naggin-divider"><td colspan="5"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</td></tr>`
+      ? `<tr class="naggin-divider"><td colspan="5"><div class="naggin-divider-inner"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</div></td></tr>`
       : '';
 
     return `
