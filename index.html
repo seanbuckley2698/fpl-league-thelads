@@ -181,6 +181,19 @@
     padding: 8px 8px;
     letter-spacing: 1px;
   }
+  tr.naggin-divider td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .naggin-bottle {
+    height: 26px;
+    width: auto;
+    vertical-align: middle;
+    filter: drop-shadow(0 0 3px rgba(0,0,0,0.6));
+  }
 
   /* ---------- stat cards (P302 / P303) ---------- */
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -348,6 +361,11 @@ const TEAM_ICONS = {
 // relegation zone. Change this if you want more/fewer teams in it.
 const RELEGATION_ZONE_SIZE = 1;
 const RELEGATION_ZONE_NAME = 'THE NAGGIN ZONE';
+const NAGGIN_BOTTLE_IMG = 'naggin_bottle.png';
+const NAGGIN_BOTTLE_COUNT = 4;
+const naggingBottles = Array(NAGGIN_BOTTLE_COUNT)
+  .fill(`<img class="naggin-bottle" src="${NAGGIN_BOTTLE_IMG}" alt="">`)
+  .join('');
 
 // FPL's API blocks direct browser requests, so every call needs to be
 // routed through something else. The most reliable option is your own
@@ -495,7 +513,7 @@ function renderStandings(standings) {
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
 
     const divider = idx === naggingStart
-      ? `<tr class="naggin-divider"><td colspan="6">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</td></tr>`
+      ? `<tr class="naggin-divider"><td colspan="6"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</td></tr>`
       : '';
 
     return `
@@ -533,7 +551,7 @@ function renderPreseasonRoster(newEntries) {
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
 
     const divider = idx === naggingStart
-      ? `<tr class="naggin-divider"><td colspan="5">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</td></tr>`
+      ? `<tr class="naggin-divider"><td colspan="5"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</td></tr>`
       : '';
 
     return `
