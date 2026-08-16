@@ -147,22 +147,23 @@
   .lead-crown { color: var(--yellow); }
 
   .team-icon {
-    width: 26px;
-    height: 26px;
+    width: 44px;
+    height: 44px;
     object-fit: cover;
-    border: 2px solid var(--dim);
+    border-radius: 6px;
     vertical-align: middle;
     display: inline-block;
   }
   .team-icon-fallback {
-    width: 26px;
-    height: 26px;
-    border: 2px solid var(--dim);
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-family: 'Press Start 2P', monospace;
-    font-size: 8px;
+    font-size: 12px;
     color: var(--cyan);
     vertical-align: middle;
   }
@@ -469,9 +470,16 @@ function teamIconHtml(entryId, teamName) {
   if (src) {
     // if the image 404s or otherwise fails, swap in the initials badge
     // instead of showing a broken-image icon
-    return `<img class="team-icon" src="${escapeHtml(src)}" alt="" onerror="this.outerHTML='${fallback.replace(/'/g, "\\'")}'">`;
+    return `<img class="team-icon" src="${escapeHtml(src)}" alt="" onerror="handleIconError(this, '${escapeHtml(initials(teamName)).replace(/'/g, "\\'")}')">`;
   }
   return fallback;
+}
+
+function handleIconError(imgEl, initialsText) {
+  const div = document.createElement('div');
+  div.className = 'team-icon-fallback';
+  div.textContent = initialsText;
+  imgEl.replaceWith(div);
 }
 
 function renderStandings(standings) {
