@@ -63,6 +63,9 @@
     color: var(--yellow);
     letter-spacing: 1px;
   }
+  .masthead .masthead-spacer {
+    min-width: 70px;
+  }
   .masthead .title {
     font-family: 'Press Start 2P', monospace;
     font-size: 13px;
@@ -166,6 +169,7 @@
 
   tr.naggin { background: rgba(255, 59, 92, 0.1); }
   tr.naggin .team-name { color: var(--red); }
+  tr.row-stripe { background: rgba(255, 255, 255, 0.04); }
   tr.naggin-divider td {
     font-family: 'Press Start 2P', monospace;
     font-size: 10px;
@@ -277,7 +281,7 @@
 
 <div class="display">
   <div class="masthead">
-    <div class="page-num" id="page-num">P301</div>
+    <div class="masthead-spacer"></div>
     <div class="title" id="page-title">THE LADS</div>
     <div class="clock" id="clock">--:--:--</div>
   </div>
@@ -286,7 +290,7 @@
   <div class="tabs">
     <button class="tab active" data-page="standings" data-num="P301" data-title="LEAGUE TABLE">League Table</button>
     <button class="tab" data-page="gameweek" data-num="P302" data-title="THIS GAMEWEEK">This Gameweek</button>
-    <button class="tab" data-page="shame" data-num="P303" data-title="HALL OF SHAME">Retard Of The Week</button>
+    <button class="tab" data-page="shame" data-num="P303" data-title="HALL OF SHAME">P303 HALL OF SHAME</button>
   </div>
 
   <div id="error-slot"></div>
@@ -472,6 +476,7 @@ function renderStandings(standings) {
     else if (delta < 0) { arrow = '&#9660; ' + Math.abs(delta); moverClass = 'mover-down'; }
     const crown = row.rank === 1 ? '<span class="lead-crown">&#9819; </span>' : '';
     const isNagging = idx >= naggingStart;
+    const stripe = idx % 2 === 1 ? 'row-stripe' : '';
 
     const divider = idx === naggingStart
       ? `<tr class="naggin-divider"><td colspan="6">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</td></tr>`
@@ -479,7 +484,7 @@ function renderStandings(standings) {
 
     return `
       ${divider}
-      <tr class="${isNagging ? 'naggin' : ''}">
+      <tr class="${isNagging ? 'naggin' : stripe}">
         <td class="num">${crown}${row.rank}</td>
         <td class="rank-cell ${moverClass}">${arrow}</td>
         <td>${teamIconHtml(row.entry, row.entry_name)}</td>
@@ -505,23 +510,37 @@ function renderStandings(standings) {
 }
 
 function renderPreseasonRoster(newEntries) {
-  const rows = newEntries.map((e, i) => `
-    <tr>
-      <td class="num">${i + 1}</td>
-      <td>${teamIconHtml(e.entry, e.entry_name)}</td>
-      <td>
-        <span class="team-name">${escapeHtml(e.entry_name)}</span>
-        <span class="manager-name">${escapeHtml(e.player_first_name + ' ' + e.player_last_name)}</span>
-      </td>
-    </tr>`).join('');
+  const naggingStart = Math.max(newEntries.length - RELEGATION_ZONE_SIZE, 0);
+
+  const rows = newEntries.map((e, idx) => {
+    const isNagging = idx >= naggingStart;
+    const stripe = idx % 2 === 1 ? 'row-stripe' : '';
+
+    const divider = idx === naggingStart
+      ? `<tr class="naggin-divider"><td colspan="5">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</td></tr>`
+      : '';
+
+    return `
+      ${divider}
+      <tr class="${isNagging ? 'naggin' : stripe}">
+        <td class="num">${idx + 1}</td>
+        <td>${teamIconHtml(e.entry, e.entry_name)}</td>
+        <td>
+          <span class="team-name">${escapeHtml(e.entry_name)}</span>
+          <span class="manager-name">${escapeHtml(e.player_first_name + ' ' + e.player_last_name)}</span>
+        </td>
+        <td class="num">&mdash;</td>
+        <td class="num">&mdash;</td>
+      </tr>`;
+  }).join('');
 
   document.getElementById('standings-slot').innerHTML = `
     <div class="card" style="margin-bottom:14px;">
       <h3>SEASON NOT STARTED YET</h3>
-      <div class="sub">The table fills in once Gameweek 1 kicks off. Here's who's in the league so far:</div>
+      <div class="sub">Points fill in once Gameweek 1 kicks off. Here's who's in the league so far:</div>
     </div>
     <table>
-      <thead><tr><th>#</th><th></th><th>TEAM</th></tr></thead>
+      <thead><tr><th>#</th><th></th><th>TEAM</th><th class="num">GW</th><th class="num">TOTAL</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
@@ -607,6 +626,33 @@ function renderGameweek(managerData) {
 /* ============================================================
    RENDER: P303 HALL OF SHAME (season so far)
    ============================================================ */
+function renderShamePlaceholder() {
+  document.getElementById('shame-slot').innerHTML = `
+    <div class="cards">
+      <div class="card gold">
+        <h3>BEST GW OF THE SEASON</h3>
+        <div class="big">&mdash;</div>
+        <div class="who">&mdash;</div>
+      </div>
+      <div class="card warn">
+        <h3>WORST GW OF THE SEASON</h3>
+        <div class="big">&mdash;</div>
+        <div class="who">&mdash;</div>
+      </div>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3>MOST POINTS BENCHED (SEASON)</h3>
+        <div class="sub">Nobody's played a gameweek yet.</div>
+      </div>
+      <div class="card">
+        <h3>MOST HITS TAKEN (SEASON)</h3>
+        <div class="sub">Nobody's played a gameweek yet.</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderShame(managerData) {
   const seasonRows = managerData.map(m => {
     const history = m.history.current || [];
@@ -728,8 +774,7 @@ async function refreshAll() {
       renderPreseasonRoster(newEntries);
       document.getElementById('gameweek-slot').innerHTML =
         `<div class="card"><h3>NOTHING TO REPORT</h3><div class="sub">This fills in once Gameweek 1 kicks off.</div></div>`;
-      document.getElementById('shame-slot').innerHTML =
-        `<div class="card"><h3>NOTHING TO REPORT</h3><div class="sub">Records start once the season's underway.</div></div>`;
+      renderShamePlaceholder();
       const track = document.getElementById('ticker-track');
       const lines = [`${newEntries.length} MANAGERS SIGNED UP AND WAITING...`, 'GAMEWEEK 1 CAN\'T COME SOON ENOUGH...'];
       const html = lines.map(l => `<span>${escapeHtml(l)}</span>`).join('');
@@ -780,7 +825,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('page-' + tab.dataset.page).classList.add('active');
-    document.getElementById('page-num').textContent = tab.dataset.num;
   });
 });
 
