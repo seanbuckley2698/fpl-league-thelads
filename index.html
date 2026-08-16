@@ -41,7 +41,7 @@
   }
 
   .display {
-    max-width: 780px;
+    max-width: 1180px;
     margin: 0 auto;
     padding: 16px 16px 40px;
   }
@@ -86,6 +86,76 @@
     font-size: 16px;
     margin-bottom: 14px;
     letter-spacing: 1px;
+  }
+
+  /* ---------- page grid: PL table | FPL table | PL results ---------- */
+  .page-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .side-panel {
+    border: 2px solid var(--dim);
+    padding: 12px 14px;
+  }
+  .side-panel h3 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    color: var(--yellow);
+    letter-spacing: 0.5px;
+    margin: 0 0 10px;
+  }
+  .pl-mini-table { width: 100%; border-collapse: collapse; }
+  .pl-mini-table th {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: var(--cyan);
+    text-align: left;
+    border-bottom: 1px solid var(--cyan);
+    padding-bottom: 6px;
+  }
+  .pl-mini-table td {
+    font-size: 15px;
+    padding: 3px 4px;
+    border-bottom: 1px dashed rgba(255,255,255,0.1);
+  }
+  .pl-team-name {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pl-results-list { list-style: none; margin: 0; padding: 0; }
+  .pl-result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 14px;
+    padding: 6px 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.1);
+  }
+  .pl-result-team {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pl-result-team:last-child { text-align: right; }
+  .pl-result-score {
+    color: var(--yellow);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  @media (min-width: 960px) {
+    .page-grid {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+    .side-panel { flex: 0 0 230px; }
+    #standings-slot { flex: 1; min-width: 0; }
   }
 
   /* ---------- nav tabs (P301 / P302 / P303) ---------- */
@@ -311,7 +381,11 @@
 
   <!-- P301 -->
   <div class="page active" id="page-standings">
-    <div id="standings-slot" class="loading-msg">FETCHING STANDINGS&hellip;</div>
+    <div class="page-grid">
+      <aside id="pl-table-slot" class="side-panel loading-msg">PL TABLE&hellip;</aside>
+      <div id="standings-slot" class="loading-msg">FETCHING STANDINGS&hellip;</div>
+      <aside id="pl-results-slot" class="side-panel loading-msg">RESULTS&hellip;</aside>
+    </div>
   </div>
 
   <!-- P302 -->
@@ -376,9 +450,22 @@ const naggingBottles = Array(NAGGIN_BOTTLE_COUNT)
 const WORKER_BASE = 'https://fpl-table-thelads.seanbuckley2698.workers.dev';
 const API = 'https://fantasy.premierleague.com/api';
 
+// Real Premier League table + results (FPL's own API doesn't have this —
+// it only has fantasy-specific team stats). TheSportsDB's free public
+// test key ("123") is used here; fine for a small personal site like this.
+const SPORTSDB = 'https://www.thesportsdb.com/api/v1/json/123';
+const PL_LEAGUE_ID = 4328;
+function currentPLSeason() {
+  const now = new Date();
+  const y = now.getFullYear();
+  // PL season runs roughly Aug–May; before July, we're still in last
+  // season's year pairing
+  return now.getMonth() >= 6 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+}
+
 function toWorkerUrl(trueUrl) {
   if (!WORKER_BASE) return null;
-  return trueUrl.replace('https://fantasy.premierleague.com', WORKER_BASE);
+  return `${WORKER_BASE}/?url=${encodeURIComponent(trueUrl)}`;
 }
 
 const PROXY_BUILDERS = [
@@ -449,6 +536,29 @@ async function loadHistory(entryId) {
   return fetchJSON(`${API}/entry/${entryId}/history/`);
 }
 
+async function loadPLTable() {
+  const season = currentPLSeason();
+  const data = await fetchJSON(`${SPORTSDB}/lookuptable.php?l=${PL_LEAGUE_ID}&s=${season}`);
+  return (data && data.table) || [];
+}
+
+async function loadPLResults() {
+  // try to grab results for the round matching our current FPL gameweek
+  // (close enough most weeks); fall back to "most recent results" if
+  // that round isn't available (e.g. postponed fixtures, early season)
+  const season = currentPLSeason();
+  if (currentGW) {
+    try {
+      const data = await fetchJSON(`${SPORTSDB}/eventsround.php?id=${PL_LEAGUE_ID}&r=${currentGW}&s=${season}`);
+      const events = (data && data.events) || [];
+      const played = events.filter(e => e.intHomeScore !== null && e.intHomeScore !== undefined);
+      if (played.length > 0) return played;
+    } catch (err) { /* fall through to recent results below */ }
+  }
+  const data = await fetchJSON(`${SPORTSDB}/eventspastleague.php?id=${PL_LEAGUE_ID}`);
+  return ((data && data.events) || []).slice(0, 10);
+}
+
 // simple concurrency-limited map so we don't fire 20 requests at once
 // through a free proxy and get throttled
 async function mapLimited(items, limit, fn) {
@@ -498,6 +608,45 @@ function handleIconError(imgEl, initialsText) {
   div.className = 'team-icon-fallback';
   div.textContent = initialsText;
   imgEl.replaceWith(div);
+}
+
+function renderPLTable(table) {
+  const slot = document.getElementById('pl-table-slot');
+  if (!table || table.length === 0) {
+    slot.innerHTML = `<h3>PREMIER LEAGUE</h3><div class="sub">Table not available right now.</div>`;
+    return;
+  }
+  const rows = table.map(t => `
+    <tr>
+      <td class="num">${escapeHtml(t.intRank)}</td>
+      <td class="pl-team-name">${escapeHtml(t.strTeam)}</td>
+      <td class="num">${escapeHtml(t.intPoints)}</td>
+    </tr>`).join('');
+  slot.innerHTML = `
+    <h3>PREMIER LEAGUE</h3>
+    <table class="pl-mini-table">
+      <thead><tr><th>#</th><th>TEAM</th><th class="num">PTS</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderPLResults(events) {
+  const slot = document.getElementById('pl-results-slot');
+  if (!events || events.length === 0) {
+    slot.innerHTML = `<h3>RESULTS</h3><div class="sub">No results available right now.</div>`;
+    return;
+  }
+  const rows = events.map(e => `
+    <li class="pl-result-row">
+      <span class="pl-result-team">${escapeHtml(e.strHomeTeam)}</span>
+      <span class="pl-result-score">${escapeHtml(e.intHomeScore)}&ndash;${escapeHtml(e.intAwayScore)}</span>
+      <span class="pl-result-team">${escapeHtml(e.strAwayTeam)}</span>
+    </li>`).join('');
+  slot.innerHTML = `
+    <h3>RESULTS</h3>
+    <ul class="pl-results-list">${rows}</ul>
+  `;
 }
 
 function renderStandings(standings) {
@@ -825,6 +974,12 @@ async function refreshAll() {
   document.getElementById('error-slot').innerHTML = '';
   try {
     await loadBootstrap();
+
+    // fire these off independently — a hiccup with the PL data source
+    // should never break the main FPL table
+    loadPLTable().then(renderPLTable).catch(() => renderPLTable(null));
+    loadPLResults().then(renderPLResults).catch(() => renderPLResults(null));
+
     const { results, newEntries } = await loadStandings();
 
     const seasonStarted = results.length > 0;
