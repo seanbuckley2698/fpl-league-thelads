@@ -335,12 +335,12 @@ const LEAGUE_ID = 840577;
 // Any team left out just gets an auto-generated initials badge instead,
 // so this is safe to leave empty until you've got images ready.
 const TEAM_ICONS = {
-  'suckmygyok': 'icons/icon_1.png',
-  'full metal jaquet': 'icons/icon_2.png',
-  'John Obi Mikels kids': 'icons/icon_3.png',
-  'Pet wussy': 'icons/icon_4.png',
-  'Hardly Athletic': 'icons/icon_5.png',
-  'Jammy Rogers': 'icons/icon_6.png',
+  'Suckmygyök': 'icon_1.png',
+  'Full Metal Jacquet': 'icon_2.png',
+  'John Obi Mikels Kids': 'icon_3.png',
+  'Pet Wussy': 'icon_4.png',
+  'Hardly Athletic': 'icon_5.png',
+  'Jammy Rogers': 'icon_6.png',
 };
 
 // How many teams at the bottom of the table get dropped into the
@@ -465,10 +465,13 @@ function initials(name) {
 
 function teamIconHtml(entryId, teamName) {
   const src = TEAM_ICONS[teamName];
+  const fallback = `<div class="team-icon-fallback">${escapeHtml(initials(teamName))}</div>`;
   if (src) {
-    return `<img class="team-icon" src="${escapeHtml(src)}" alt="">`;
+    // if the image 404s or otherwise fails, swap in the initials badge
+    // instead of showing a broken-image icon
+    return `<img class="team-icon" src="${escapeHtml(src)}" alt="" onerror="this.outerHTML='${fallback.replace(/'/g, "\\'")}'">`;
   }
-  return `<div class="team-icon-fallback">${escapeHtml(initials(teamName))}</div>`;
+  return fallback;
 }
 
 function renderStandings(standings) {
