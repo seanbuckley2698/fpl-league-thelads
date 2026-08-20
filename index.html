@@ -239,6 +239,34 @@
   }
 
   tr.naggin { background: rgba(255, 59, 92, 0.1); }
+
+  .team-cell-clickable { cursor: pointer; }
+  .team-cell-clickable:hover .team-name { color: var(--cyan); }
+  .row-mover-arrow { display: inline-block; width: 12px; font-size: 12px; }
+  .expand-chevron { color: var(--dim); margin-left: 6px; font-size: 12px; }
+
+  tr.manager-detail-row td {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+    padding: 10px 14px 14px;
+  }
+  .manager-detail { font-size: 16px; }
+  .detail-section-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    color: var(--yellow);
+    margin: 10px 0 4px;
+  }
+  .detail-section-label:first-child { margin-top: 0; }
+  .detail-player-list { list-style: none; margin: 0; padding: 0; }
+  .detail-player-list li {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.08);
+  }
+  .detail-player-list.bench { opacity: 0.7; }
+  .dp-pts { color: var(--cyan); }
   tr.naggin .team-name { color: var(--red); }
   tr.row-stripe { background: rgba(255, 255, 255, 0.04); }
   tr.naggin-divider td {
@@ -428,7 +456,7 @@ const TEAM_ICONS = {
   'John Obi Mikels Kids': 'icon_3.png',
   'Pet Wussy': 'icon_4.png',
   'Hardly Athletic': 'icon_5.png',
-  'Jammy Rogers': 'icon_6.png',
+  'GittensJiggyWithIt': 'icon_6.png',
 };
 
 // How many teams at the bottom of the table get dropped into the
@@ -451,17 +479,14 @@ const WORKER_BASE = 'https://fpl-table-thelads.seanbuckley2698.workers.dev';
 const API = 'https://fantasy.premierleague.com/api';
 
 // Real Premier League table + results (FPL's own API doesn't have this —
-// it only has fantasy-specific team stats). TheSportsDB's free public
-// test key ("123") is used here; fine for a small personal site like this.
-const SPORTSDB = 'https://www.thesportsdb.com/api/v1/json/123';
-const PL_LEAGUE_ID = 4328;
-function currentPLSeason() {
-  const now = new Date();
-  const y = now.getFullYear();
-  // PL season runs roughly Aug–May; before July, we're still in last
-  // season's year pairing
-  return now.getMonth() >= 6 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
-}
+// it only has fantasy-specific team stats). Uses football-data.org,
+// which needs a free API key — get one instantly (just an email, no
+// card) at https://www.football-data.org/client/register, then paste
+// it into the FOOTBALL_DATA_API_KEY constant near the top of the
+// Worker code (not here — keeping it server-side means it's never
+// exposed in the page source).
+const FOOTBALL_DATA_API = 'https://api.football-data.org/v4';
+const PL_COMPETITION = 'PL';
 
 function toWorkerUrl(trueUrl) {
   if (!WORKER_BASE) return null;
@@ -502,6 +527,11 @@ async function fetchJSON(url) {
 let elementsMap = {};   // player id -> player object (with event_points)
 let currentGW = null;
 let leagueName = '';
+let latestManagerData = {}; // entryId -> { picks, entryHistory, ... }
+let lastStandingsResults = [];
+let expandedEntries = new Set();
+
+const POSITION_LABELS = { 1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD' };
 
 /* ============================================================
    LOADERS
@@ -537,26 +567,26 @@ async function loadHistory(entryId) {
 }
 
 async function loadPLTable() {
-  const season = currentPLSeason();
-  const data = await fetchJSON(`${SPORTSDB}/lookuptable.php?l=${PL_LEAGUE_ID}&s=${season}`);
-  return (data && data.table) || [];
+  const data = await fetchJSON(`${FOOTBALL_DATA_API}/competitions/${PL_COMPETITION}/standings`);
+  const totalTable = (data.standings || []).find(s => s.type === 'TOTAL');
+  return (totalTable && totalTable.table) || [];
 }
 
 async function loadPLResults() {
-  // try to grab results for the round matching our current FPL gameweek
-  // (close enough most weeks); fall back to "most recent results" if
-  // that round isn't available (e.g. postponed fixtures, early season)
-  const season = currentPLSeason();
+  // try to grab results for the matchday matching our current FPL
+  // gameweek (these usually line up); fall back to "most recent
+  // finished results this season" if that matchday has nothing yet
   if (currentGW) {
     try {
-      const data = await fetchJSON(`${SPORTSDB}/eventsround.php?id=${PL_LEAGUE_ID}&r=${currentGW}&s=${season}`);
-      const events = (data && data.events) || [];
-      const played = events.filter(e => e.intHomeScore !== null && e.intHomeScore !== undefined);
-      if (played.length > 0) return played;
+      const data = await fetchJSON(`${FOOTBALL_DATA_API}/competitions/${PL_COMPETITION}/matches?matchday=${currentGW}`);
+      const finished = (data.matches || []).filter(m => m.status === 'FINISHED');
+      if (finished.length > 0) return finished;
     } catch (err) { /* fall through to recent results below */ }
   }
-  const data = await fetchJSON(`${SPORTSDB}/eventspastleague.php?id=${PL_LEAGUE_ID}`);
-  return ((data && data.events) || []).slice(0, 10);
+  const data = await fetchJSON(`${FOOTBALL_DATA_API}/competitions/${PL_COMPETITION}/matches?status=FINISHED`);
+  const matches = data.matches || [];
+  matches.sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
+  return matches.slice(0, 10);
 }
 
 // simple concurrency-limited map so we don't fire 20 requests at once
@@ -618,9 +648,9 @@ function renderPLTable(table) {
   }
   const rows = table.map(t => `
     <tr>
-      <td class="num">${escapeHtml(t.intRank)}</td>
-      <td class="pl-team-name">${escapeHtml(t.strTeam)}</td>
-      <td class="num">${escapeHtml(t.intPoints)}</td>
+      <td class="num">${escapeHtml(t.position)}</td>
+      <td class="pl-team-name">${escapeHtml(t.team.shortName || t.team.name)}</td>
+      <td class="num">${escapeHtml(t.points)}</td>
     </tr>`).join('');
   slot.innerHTML = `
     <h3>PREMIER LEAGUE</h3>
@@ -631,17 +661,17 @@ function renderPLTable(table) {
   `;
 }
 
-function renderPLResults(events) {
+function renderPLResults(matches) {
   const slot = document.getElementById('pl-results-slot');
-  if (!events || events.length === 0) {
-    slot.innerHTML = `<h3>RESULTS</h3><div class="sub">No results available right now.</div>`;
+  if (!matches || matches.length === 0) {
+    slot.innerHTML = `<h3>RESULTS</h3><div class="sub">No matches played yet this season.</div>`;
     return;
   }
-  const rows = events.map(e => `
+  const rows = matches.map(m => `
     <li class="pl-result-row">
-      <span class="pl-result-team">${escapeHtml(e.strHomeTeam)}</span>
-      <span class="pl-result-score">${escapeHtml(e.intHomeScore)}&ndash;${escapeHtml(e.intAwayScore)}</span>
-      <span class="pl-result-team">${escapeHtml(e.strAwayTeam)}</span>
+      <span class="pl-result-team">${escapeHtml(m.homeTeam.shortName || m.homeTeam.name)}</span>
+      <span class="pl-result-score">${escapeHtml(m.score.fullTime.home)}&ndash;${escapeHtml(m.score.fullTime.away)}</span>
+      <span class="pl-result-team">${escapeHtml(m.awayTeam.shortName || m.awayTeam.name)}</span>
     </li>`).join('');
   slot.innerHTML = `
     <h3>RESULTS</h3>
@@ -649,7 +679,35 @@ function renderPLResults(events) {
   `;
 }
 
+function renderManagerDetail(entryId) {
+  const m = latestManagerData[entryId];
+  if (!m) {
+    return `<div class="manager-detail"><div class="sub">No gameweek data yet for this manager.</div></div>`;
+  }
+  const sorted = [...m.picks].sort((a, b) => a.position - b.position);
+  const starters = sorted.filter(p => p.position <= 11);
+  const bench = sorted.filter(p => p.position > 11);
+
+  const playerRow = p => {
+    const el = elementsMap[p.element];
+    const posLabel = el ? POSITION_LABELS[el.element_type] || '' : '';
+    const tag = p.is_captain ? ' (C)' : (p.is_vice_captain ? ' (VC)' : '');
+    const rawPts = playerPts(p.element);
+    const shownPts = p.multiplier > 1 ? rawPts * p.multiplier : rawPts;
+    return `<li><span class="dp-name">${escapeHtml(posLabel)} ${escapeHtml(playerName(p.element))}${escapeHtml(tag)}</span><span class="dp-pts">${shownPts}</span></li>`;
+  };
+
+  return `
+    <div class="manager-detail">
+      <div class="detail-section-label">STARTING XI</div>
+      <ul class="detail-player-list">${starters.map(playerRow).join('')}</ul>
+      <div class="detail-section-label">BENCH</div>
+      <ul class="detail-player-list bench">${bench.map(playerRow).join('')}</ul>
+    </div>`;
+}
+
 function renderStandings(standings) {
+  lastStandingsResults = standings;
   const naggingStart = Math.max(standings.length - RELEGATION_ZONE_SIZE, 0);
 
   const rows = standings.map((row, idx) => {
@@ -657,12 +715,18 @@ function renderStandings(standings) {
     let arrow = '&#9679;', moverClass = 'mover-flat';
     if (delta > 0) { arrow = '&#9650; ' + delta; moverClass = 'mover-up'; }
     else if (delta < 0) { arrow = '&#9660; ' + Math.abs(delta); moverClass = 'mover-down'; }
+    const nameArrow = delta > 0 ? '&#9650;' : (delta < 0 ? '&#9660;' : '&#9679;');
     const crown = row.rank === 1 ? '<span class="lead-crown">&#9819; </span>' : '';
     const isNagging = idx >= naggingStart;
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
+    const isExpanded = expandedEntries.has(row.entry);
 
     const divider = idx === naggingStart
       ? `<tr class="naggin-divider"><td colspan="6"><div class="naggin-divider-inner"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</div></td></tr>`
+      : '';
+
+    const detailRow = isExpanded
+      ? `<tr class="manager-detail-row"><td colspan="6">${renderManagerDetail(row.entry)}</td></tr>`
       : '';
 
     return `
@@ -671,13 +735,16 @@ function renderStandings(standings) {
         <td class="num">${crown}${row.rank}</td>
         <td class="rank-cell ${moverClass}">${arrow}</td>
         <td>${teamIconHtml(row.entry, row.entry_name)}</td>
-        <td>
+        <td class="team-cell-clickable" data-entry="${row.entry}">
+          <span class="row-mover-arrow ${moverClass}">${nameArrow}</span>
           <span class="team-name">${escapeHtml(row.entry_name)}</span>
+          <span class="expand-chevron">${isExpanded ? '&#9662;' : '&#9656;'}</span>
           <span class="manager-name">${escapeHtml(row.player_name)}</span>
         </td>
         <td class="num">${row.event_total}</td>
         <td class="num">${row.total}</td>
-      </tr>`;
+      </tr>
+      ${detailRow}`;
   }).join('');
 
   document.getElementById('standings-slot').innerHTML = `
@@ -1019,6 +1086,12 @@ async function refreshAll() {
       renderGameweek(managerData);
       renderShame(managerData);
       buildTicker(results, managerData);
+
+      // make squad data available to click-to-expand rows, then
+      // re-render so any already-expanded row shows fresh numbers
+      latestManagerData = {};
+      managerData.forEach(m => { latestManagerData[m.entryId] = m; });
+      if (expandedEntries.size > 0) renderStandings(results);
     }
 
     document.getElementById('last-synced').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -1047,6 +1120,18 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 document.getElementById('refresh-btn').addEventListener('click', refreshAll);
+
+document.getElementById('standings-slot').addEventListener('click', (e) => {
+  const cell = e.target.closest('.team-cell-clickable');
+  if (!cell) return;
+  const entryId = Number(cell.dataset.entry);
+  if (expandedEntries.has(entryId)) {
+    expandedEntries.delete(entryId);
+  } else {
+    expandedEntries.add(entryId);
+  }
+  if (lastStandingsResults.length > 0) renderStandings(lastStandingsResults);
+});
 
 updateClock();
 setInterval(updateClock, 1000);
