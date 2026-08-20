@@ -267,6 +267,28 @@
   }
   .detail-player-list.bench { opacity: 0.7; }
   .dp-pts { color: var(--cyan); }
+
+  .rank-graph-svg { width: 100%; height: auto; margin-top: 4px; }
+  .graph-gridline { stroke: rgba(255,255,255,0.08); stroke-width: 1; }
+  .graph-axis-label {
+    fill: var(--dim);
+    font-family: 'VT323', monospace;
+    font-size: 13px;
+  }
+  .graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin-top: 14px;
+    font-size: 15px;
+  }
+  .graph-legend-item { display: flex; align-items: center; gap: 6px; }
+  .graph-legend-swatch {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    border-radius: 2px;
+  }
   tr.naggin .team-name { color: var(--red); }
   tr.row-stripe { background: rgba(255, 255, 255, 0.04); }
   tr.naggin-divider td {
@@ -403,6 +425,7 @@
     <button class="tab active" data-page="standings" data-num="P301" data-title="LEAGUE TABLE">League Table</button>
     <button class="tab" data-page="gameweek" data-num="P302" data-title="THIS GAMEWEEK">This Gameweek</button>
     <button class="tab" data-page="shame" data-num="P303" data-title="HALL OF SHAME">P303 HALL OF SHAME</button>
+    <button class="tab" data-page="graph" data-num="P304" data-title="RANK OVER TIME">Rank Graph</button>
   </div>
 
   <div id="error-slot"></div>
@@ -424,6 +447,12 @@
   <!-- P303 -->
   <div class="page" id="page-shame">
     <div id="shame-slot" class="loading-msg">DIGGING THROUGH THE ARCHIVES&hellip;</div>
+    <div id="league-history-slot"></div>
+  </div>
+
+  <!-- P304 -->
+  <div class="page" id="page-graph">
+    <div id="graph-slot" class="loading-msg">PLOTTING THE SEASON&hellip;</div>
   </div>
 
   <div class="status-line">
@@ -464,6 +493,16 @@ const TEAM_ICONS = {
 // relegation zone. Change this if you want more/fewer teams in it.
 const RELEGATION_ZONE_SIZE = 1;
 const RELEGATION_ZONE_NAME = 'THE NAGGIN ZONE';
+
+// FPL's API only exposes the CURRENT season's mini-league standings —
+// there's no way to automatically pull who won in past years. So this
+// is filled in by hand instead: add one entry per season and the site
+// automatically tallies up titles/wooden spoons per manager below.
+// Leave it empty and that section just explains itself instead.
+const LEAGUE_HISTORY = [
+  // { season: '2022/23', winner: 'Team Name', woodenSpoon: 'Team Name' },
+  // { season: '2023/24', winner: 'Team Name', woodenSpoon: 'Team Name' },
+];
 const NAGGIN_BOTTLE_IMG = 'naggin_bottle.png';
 const NAGGIN_BOTTLE_COUNT = 4;
 const naggingBottles = Array(NAGGIN_BOTTLE_COUNT)
@@ -530,6 +569,8 @@ let currentGW = null;
 let leagueName = '';
 let latestManagerData = {}; // entryId -> { picks, entryHistory, ... }
 let lastStandingsResults = [];
+let lastNewEntries = [];
+let isPreseasonMode = false;
 let expandedEntries = new Set();
 
 const POSITION_LABELS = { 1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD' };
@@ -680,10 +721,41 @@ function renderPLResults(matches) {
   `;
 }
 
+function renderManagerDetailPlaceholder() {
+  const starters = [
+    { pos: 'GKP', name: 'Sample Keeper' },
+    { pos: 'DEF', name: 'Sample Defender' },
+    { pos: 'DEF', name: 'Sample Defender' },
+    { pos: 'DEF', name: 'Sample Defender' },
+    { pos: 'DEF', name: 'Sample Defender' },
+    { pos: 'MID', name: 'Sample Midfielder' },
+    { pos: 'MID', name: 'Sample Midfielder' },
+    { pos: 'MID', name: 'Sample Midfielder' },
+    { pos: 'MID', name: 'Sample Midfielder (C)' },
+    { pos: 'FWD', name: 'Sample Forward' },
+    { pos: 'FWD', name: 'Sample Forward' }
+  ];
+  const bench = [
+    { pos: 'GKP', name: 'Sample Keeper' },
+    { pos: 'DEF', name: 'Sample Defender' },
+    { pos: 'MID', name: 'Sample Midfielder' },
+    { pos: 'FWD', name: 'Sample Forward' }
+  ];
+  const row = p => `<li><span class="dp-name">${escapeHtml(p.pos)} ${escapeHtml(p.name)}</span><span class="dp-pts">&mdash;</span></li>`;
+  return `
+    <div class="manager-detail">
+      <div class="sub" style="margin-bottom:8px;">Preview only &mdash; real squads and points show up once the season's underway.</div>
+      <div class="detail-section-label">STARTING XI</div>
+      <ul class="detail-player-list">${starters.map(row).join('')}</ul>
+      <div class="detail-section-label">BENCH</div>
+      <ul class="detail-player-list bench">${bench.map(row).join('')}</ul>
+    </div>`;
+}
+
 function renderManagerDetail(entryId) {
   const m = latestManagerData[entryId];
   if (!m) {
-    return `<div class="manager-detail"><div class="sub">No gameweek data yet for this manager.</div></div>`;
+    return renderManagerDetailPlaceholder();
   }
   const sorted = [...m.picks].sort((a, b) => a.position - b.position);
   const starters = sorted.filter(p => p.position <= 11);
@@ -761,14 +833,20 @@ function renderStandings(standings) {
 }
 
 function renderPreseasonRoster(newEntries) {
+  lastStandingsResults = []; // no real standings yet — expand uses the placeholder
   const naggingStart = Math.max(newEntries.length - RELEGATION_ZONE_SIZE, 0);
 
   const rows = newEntries.map((e, idx) => {
     const isNagging = idx >= naggingStart;
     const stripe = idx % 2 === 1 ? 'row-stripe' : '';
+    const isExpanded = expandedEntries.has(e.entry);
 
     const divider = idx === naggingStart
       ? `<tr class="naggin-divider"><td colspan="5"><div class="naggin-divider-inner"><span class="naggin-label">&#9650;&#9650;&#9650; ${escapeHtml(RELEGATION_ZONE_NAME)} &#9650;&#9650;&#9650;</span>${naggingBottles}</div></td></tr>`
+      : '';
+
+    const detailRow = isExpanded
+      ? `<tr class="manager-detail-row"><td colspan="5">${renderManagerDetail(e.entry)}</td></tr>`
       : '';
 
     return `
@@ -776,13 +854,15 @@ function renderPreseasonRoster(newEntries) {
       <tr class="${isNagging ? 'naggin' : stripe}">
         <td class="num">${idx + 1}</td>
         <td>${teamIconHtml(e.entry, e.entry_name)}</td>
-        <td>
+        <td class="team-cell-clickable" data-entry="${e.entry}">
           <span class="team-name">${escapeHtml(e.entry_name)}</span>
+          <span class="expand-chevron">${isExpanded ? '&#9662;' : '&#9656;'}</span>
           <span class="manager-name">${escapeHtml(e.player_first_name + ' ' + e.player_last_name)}</span>
         </td>
         <td class="num">&mdash;</td>
         <td class="num">&mdash;</td>
-      </tr>`;
+      </tr>
+      ${detailRow}`;
   }).join('');
 
   document.getElementById('standings-slot').innerHTML = `
@@ -934,6 +1014,56 @@ function renderShamePlaceholder() {
   `;
 }
 
+function renderLeagueHistory() {
+  const slot = document.getElementById('league-history-slot');
+  if (!slot) return;
+
+  if (LEAGUE_HISTORY.length === 0) {
+    slot.innerHTML = `
+      <div class="card" style="margin-top:16px;">
+        <h3>LEAGUE HISTORY</h3>
+        <div class="sub">FPL doesn't keep past seasons' mini-league standings anywhere I can pull from automatically. Tell me each season's winner and wooden spoon and I'll add them here permanently &mdash; this section will then automatically total up titles and spoons per manager too.</div>
+      </div>`;
+    return;
+  }
+
+  const winCounts = {}, spoonCounts = {};
+  LEAGUE_HISTORY.forEach(s => {
+    winCounts[s.winner] = (winCounts[s.winner] || 0) + 1;
+    spoonCounts[s.woodenSpoon] = (spoonCounts[s.woodenSpoon] || 0) + 1;
+  });
+
+  const seasonRows = LEAGUE_HISTORY.map(s => `
+    <tr>
+      <td>${escapeHtml(s.season)}</td>
+      <td style="color: var(--yellow);">${escapeHtml(s.winner)}</td>
+      <td style="color: var(--red);">${escapeHtml(s.woodenSpoon)}</td>
+    </tr>`).join('');
+
+  const winList = Object.entries(winCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `<li>${escapeHtml(name)} &mdash; <span style="color:var(--yellow)">${count}x</span></li>`)
+    .join('');
+  const spoonList = Object.entries(spoonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `<li>${escapeHtml(name)} &mdash; <span style="color:var(--red)">${count}x</span></li>`)
+    .join('');
+
+  slot.innerHTML = `
+    <div class="card" style="margin-top:16px;">
+      <h3>LEAGUE HISTORY</h3>
+      <table class="pl-mini-table" style="margin-top:8px; width:100%;">
+        <thead><tr><th>SEASON</th><th>WINNER</th><th>WOODEN SPOON</th></tr></thead>
+        <tbody>${seasonRows}</tbody>
+      </table>
+    </div>
+    <div class="cards" style="margin-top:12px;">
+      <div class="card gold"><h3>MOST TITLES</h3><ul class="plain">${winList}</ul></div>
+      <div class="card warn"><h3>MOST WOODEN SPOONS</h3><ul class="plain">${spoonList}</ul></div>
+    </div>
+  `;
+}
+
 function renderShame(managerData) {
   const seasonRows = managerData.map(m => {
     const history = m.history.current || [];
@@ -980,6 +1110,109 @@ function renderShame(managerData) {
           `<li>${escapeHtml(r.team)} &mdash; <span style="color:var(--red)">-${r.totalHits}</span></li>`
         ).join('')}</ul>
       </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   P304: RANK-OVER-TIME GRAPH
+   ============================================================ */
+// FPL's API has no endpoint for "our mini-league's rank each
+// gameweek" — it only has each manager's global FPL rank, not their
+// rank within our specific league. So this is computed ourselves:
+// for every finished gameweek, take each manager's cumulative total
+// points at that point and rank them against each other.
+function computeRankHistory(managerData) {
+  if (managerData.length === 0 || !currentGW) return { gameweeks: [], series: [] };
+
+  const gameweeks = [];
+  for (let gw = 1; gw <= currentGW; gw++) gameweeks.push(gw);
+
+  const series = managerData.map(m => ({
+    entryId: m.entryId,
+    team: m.team,
+    ranks: [] // rank at each gameweek, same order as `gameweeks`
+  }));
+
+  gameweeks.forEach((gw, gwIdx) => {
+    const totals = managerData.map(m => {
+      const history = m.history.current || [];
+      const row = history.find(h => h.event === gw);
+      return { entryId: m.entryId, total: row ? row.total_points : null };
+    });
+    const withData = totals.filter(t => t.total !== null);
+    withData.sort((a, b) => b.total - a.total);
+    const rankByEntry = {};
+    withData.forEach((t, i) => { rankByEntry[t.entryId] = i + 1; });
+
+    series.forEach(s => {
+      s.ranks[gwIdx] = rankByEntry[s.entryId] || null;
+    });
+  });
+
+  return { gameweeks, series };
+}
+
+function managerColor(idx, total) {
+  const hue = Math.round((idx * 137.508) % 360); // golden-angle spread
+  return `hsl(${hue}, 70%, 60%)`;
+}
+
+function renderRankGraph(managerData) {
+  const slot = document.getElementById('graph-slot');
+  const { gameweeks, series } = computeRankHistory(managerData);
+
+  if (gameweeks.length === 0 || series.length === 0) {
+    slot.innerHTML = `<div class="card"><h3>NOTHING TO PLOT YET</h3><div class="sub">This fills in once a few gameweeks are in the books.</div></div>`;
+    return;
+  }
+
+  const numManagers = series.length;
+  const W = 760, H = 380;
+  const padL = 34, padR = 16, padT = 16, padB = 34;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  const xFor = i => padL + (gameweeks.length <= 1 ? 0 : i * (chartW / (gameweeks.length - 1)));
+  const yFor = rank => padT + (numManagers <= 1 ? 0 : (rank - 1) * (chartH / (numManagers - 1)));
+
+  const gridLines = [];
+  for (let r = 1; r <= numManagers; r++) {
+    gridLines.push(`<line x1="${padL}" y1="${yFor(r)}" x2="${W - padR}" y2="${yFor(r)}" class="graph-gridline" />`);
+    gridLines.push(`<text x="${padL - 8}" y="${yFor(r) + 4}" class="graph-axis-label" text-anchor="end">${r}</text>`);
+  }
+  gameweeks.forEach((gw, i) => {
+    if (gameweeks.length > 12 && i % 2 === 1) return; // thin out labels if crowded
+    gridLines.push(`<text x="${xFor(i)}" y="${H - padB + 18}" class="graph-axis-label" text-anchor="middle">${gw}</text>`);
+  });
+
+  const lines = series.map((s, idx) => {
+    const color = managerColor(idx, numManagers);
+    const points = s.ranks
+      .map((r, i) => (r === null ? null : `${xFor(i)},${yFor(r)}`))
+      .filter(Boolean)
+      .join(' ');
+    const dots = s.ranks
+      .map((r, i) => (r === null ? '' : `<circle cx="${xFor(i)}" cy="${yFor(r)}" r="3" fill="${color}" />`))
+      .join('');
+    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" />${dots}`;
+  }).join('');
+
+  const legend = series.map((s, idx) => `
+    <div class="graph-legend-item">
+      <span class="graph-legend-swatch" style="background:${managerColor(idx, numManagers)}"></span>
+      ${escapeHtml(s.team)}
+    </div>`).join('');
+
+  slot.innerHTML = `
+    <div class="side-panel">
+      <h3>RANK OVER TIME</h3>
+      <div class="sub" style="margin-bottom:10px;">Lower is better &mdash; 1st place sits at the top.</div>
+      <svg viewBox="0 0 ${W} ${H}" class="rank-graph-svg">
+        ${gridLines.join('')}
+        ${lines}
+      </svg>
+      <div class="graph-legend">${legend}</div>
     </div>
   `;
 }
@@ -1051,6 +1284,8 @@ async function refreshAll() {
     const { results, newEntries } = await loadStandings();
 
     const seasonStarted = results.length > 0;
+    isPreseasonMode = !seasonStarted;
+    lastNewEntries = newEntries;
 
     document.getElementById('league-name').textContent =
       leagueName + (seasonStarted ? ' — GAMEWEEK ' + currentGW : ' — PRESEASON');
@@ -1061,6 +1296,7 @@ async function refreshAll() {
       renderPreseasonRoster(newEntries);
       renderGameweekPlaceholder();
       renderShamePlaceholder();
+      renderRankGraph([]);
       const track = document.getElementById('ticker-track');
       const lines = [`${newEntries.length} MANAGERS SIGNED UP AND WAITING...`, 'GAMEWEEK 1 CAN\'T COME SOON ENOUGH...'];
       const html = lines.map(l => `<span>${escapeHtml(l)}</span>`).join('');
@@ -1086,6 +1322,7 @@ async function refreshAll() {
 
       renderGameweek(managerData);
       renderShame(managerData);
+      renderRankGraph(managerData);
       buildTicker(results, managerData);
 
       // make squad data available to click-to-expand rows, then
@@ -1131,9 +1368,14 @@ document.getElementById('standings-slot').addEventListener('click', (e) => {
   } else {
     expandedEntries.add(entryId);
   }
-  if (lastStandingsResults.length > 0) renderStandings(lastStandingsResults);
+  if (isPreseasonMode) {
+    renderPreseasonRoster(lastNewEntries);
+  } else if (lastStandingsResults.length > 0) {
+    renderStandings(lastStandingsResults);
+  }
 });
 
+renderLeagueHistory();
 updateClock();
 setInterval(updateClock, 1000);
 refreshAll();
